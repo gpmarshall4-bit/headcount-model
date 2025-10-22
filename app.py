@@ -6,15 +6,22 @@ from datetime import date
 # Set the end date for the forecast
 END_DATE = date(2026, 12, 31)
 
-# --- 1. Initial Data Setup ---
+# --- 1. Initial Data Setup (RENAMED TEAMS HERE) ---
 # Base data structure reflecting the initial table
 initial_data = {
-    'Team': ['1-2 AM', '3-4 AM', '5-9 AM', '10-19 AM', '20-29 AM', '30-49 AM', '50-99 AM', '100-149 AM'],
-    'Promotion_Destination': ['3-4 AM', '5-9 AM', '10-19 AM', '20-29 AM', '30-49 AM', '50-99 AM', '100-149 AM', 'n/a'],
+    'Team': [
+        'SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM', 
+        'CMRL 10-19 AM', 'CMRL 20-29 AM', 'CMRL 30-49 AM', 
+        'MM 50-99 AM', 'MM 100-149 AM'
+    ],
+    'Promotion_Destination': [
+        'SMB 3-4 AM', 'SMB 5-9 AM', 'CMRL 10-19 AM', 
+        'CMRL 20-29 AM', 'CMRL 30-49 AM', 'MM 50-99 AM', 
+        'MM 100-149 AM', 'n/a'
+    ],
     'Starting_HC': [10, 36, 15, 88, 44, 30, 27, 10],
     'Monthly_Hires': [1, 20, 15, 4, 1, 1, 0, 0],
     'Monthly_Attrition_Rate': [0.02, 0.05, 0.02, 0.03, 0.02, 0.02, 0.02, 0.02],
-    # Use the mid-point of the typical promotion range for the default value
     'Quarterly_Promotion_Rate': [0.05, 0.30, 0.225, 0.10, 0.10, 0.075, 0.065, 0.0] 
 }
 df_initial = pd.DataFrame(initial_data).set_index('Team')
@@ -25,11 +32,9 @@ st.set_page_config(layout="wide", page_title="Headcount Growth Model")
 st.title("Interactive Headcount Growth Model 🚀")
 st.caption("Adjust the sliders in the sidebar to dynamically forecast team and total headcount through the end of 2026.")
 
-# Create columns for the input controls layout
 teams = df_initial.index.tolist()
 current_inputs = {}
 
-# Generate interactive controls for each team in the sidebar
 st.sidebar.header("Team Specific Controls")
 
 for team in teams:
@@ -49,42 +54,37 @@ for team in teams:
     current_inputs[f'{team}_attrition'] = st.sidebar.slider(
         f"Monthly Attrition Rate (%) ({team})", 
         min_value=0.0, max_value=10.0, step=0.1, 
-        value=df_initial.loc[team, 'Monthly_Attrition_Rate'] * 100, # Convert to % for UI
+        value=df_initial.loc[team, 'Monthly_Attrition_Rate'] * 100,
         format="%.1f %%", key=f'mar_{team}'
-    ) / 100.0 # Convert back to decimal for calculation
+    ) / 100.0
 
     # Quarterly Promotion Rate (%) (Slider)
     current_inputs[f'{team}_promotion'] = st.sidebar.slider(
         f"Quarterly Promotion Rate (%) ({team})", 
         min_value=0.0, max_value=40.0, step=0.5, 
-        value=df_initial.loc[team, 'Quarterly_Promotion_Rate'] * 100, # Convert to % for UI
+        value=df_initial.loc[team, 'Quarterly_Promotion_Rate'] * 100,
         format="%.1f %%", key=f'qpr_{team}'
-    ) / 100.0 # Convert back to decimal for calculation
+    ) / 100.0
 
-# --- 3. Forecasting Logic (Corrected for all Pandas versions) ---
+# --- 3. Forecasting Logic ---
 
 def run_forecast(inputs, initial_data):
     """Calculates the monthly headcount for each team."""
     
     start_date = date.today()
     
-    # Generate month-end dates from the start of the current month until the end date
-    # This results in a DatetimeIndex object
     dates = pd.date_range(start=start_date.replace(day=1), end=END_DATE, freq='M')
-    
     num_months = len(dates)
     
-    # Initialize the results DataFrame with the starting headcount
     results_df = pd.DataFrame(
         index=['Start'] + dates.strftime('%Y-%m').tolist(), 
         columns=initial_data.index
     )
     
-    # Set the initial headcount for all teams (Row 0)
     for team in initial_data.index:
         results_df.loc['Start', team] = inputs[f'{team}_start_hc']
         
-    results_df = results_df.astype(float) # Ensure all numbers are floats
+    results_df = results_df.astype(float) 
     
     
     # Simulation loop
@@ -92,11 +92,10 @@ def run_forecast(inputs, initial_data):
         prev_month_label = results_df.index[m-1]
         current_month_label = dates.strftime('%Y-%m')[m-1]
 
-        # First, copy the previous month's headcount
         results_df.loc[current_month_label] = results_df.loc[prev_month_label]
 
-        promotions_out = {} # Store promotions out of a team
-        promotions_in = {}  # Store promotions into a team
+        promotions_out = {} 
+        promotions_in = {} 
 
         for team in initial_data.index:
             
@@ -106,12 +105,9 @@ def run_forecast(inputs, initial_data):
             monthly_attrition = inputs[f'{team}_attrition']
             quarterly_promotion_rate = inputs[f'{team}_promotion']
             
-            # --- 1. Attrition ---
+            # --- 1. Attrition & 2. New Hires ---
             attrition_count = current_hc * monthly_attrition
-            current_hc -= attrition_count
-            
-            # --- 2. New Hires ---
-            current_hc += monthly_hires
+            current_hc = current_hc - attrition_count + monthly_hires
             
             # --- 3. Promotions (Calculated Monthly, Applied Quarterly) ---
             promotion_destination = initial_data.loc[team, 'Promotion_Destination']
@@ -140,15 +136,14 @@ def run_forecast(inputs, initial_data):
     results_df['Total Headcount'] = results_df.drop('Start').sum(axis=1)
     
     # Final cleanup: fill NaNs with 0, round to nearest integer, and drop the 'Start' row
-    # FIX: Fill any possible NaN values with 0 before converting to integer (prevents IntCastingNaNError)
     results_df = results_df.fillna(0).round(0).astype(int)
     
-    # Create aggregated rows for SMB, CMRL, MM
+    # Create aggregated rows for SMB, CMRL, MM (UPDATED TEAM NAMES HERE)
     df_final = results_df.drop('Start').copy()
     
-    df_final['SMB Total'] = df_final[['1-2 AM', '3-4 AM', '5-9 AM']].sum(axis=1)
-    df_final['CMRL Total'] = df_final[['10-19 AM', '20-29 AM', '30-49 AM']].sum(axis=1)
-    df_final['MM Total'] = df_final[['50-99 AM', '100-149 AM']].sum(axis=1)
+    df_final['SMB Total'] = df_final[['SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM']].sum(axis=1)
+    df_final['CMRL Total'] = df_final[['CMRL 10-19 AM', 'CMRL 20-29 AM', 'CMRL 30-49 AM']].sum(axis=1)
+    df_final['MM Total'] = df_final[['MM 50-99 AM', 'MM 100-149 AM']].sum(axis=1)
 
     return df_final
 
@@ -159,17 +154,12 @@ projection_df = run_forecast(current_inputs, df_initial)
 # --- 4. Visualization and Output ---
 
 st.header("Total Headcount Projection")
-# Visualization for Total Headcount (and segments)
 st.line_chart(projection_df[['Total Headcount', 'SMB Total', 'CMRL Total', 'MM Total']])
 
-
 st.header("Individual Team Headcount Projections")
-# Visualization for individual teams
 st.line_chart(projection_df[df_initial.index.tolist()])
 
-# Display key metric
 st.markdown(f"**Total Projected Headcount by End of 2026:** **{projection_df['Total Headcount'].iloc[-1]:,}**")
 
-# Show detailed data table
 st.subheader("Detailed Monthly Projection Table")
 st.dataframe(projection_df)
