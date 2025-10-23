@@ -131,4 +131,84 @@ def run_forecast(inputs, initial_data):
     results_df = results_df.fillna(0).round(0).astype(int)
     
     # Create aggregated rows for SMB, CMRL, MM
-    df_final = results_df.drop('
+    df_final = results_df.drop('Start').copy()
+    
+    df_final['SMB Total'] = df_final[['SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM']].sum(axis=1)
+    df_final['CMRL Total'] = df_final[['CMRL 10-19 AM', 'CMRL 20-29 AM', 'CMRL 30-49 AM']].sum(axis=1)
+    df_final['MM Total'] = df_final[['MM 50-99 AM', 'MM 100-149 AM']].sum(axis=1)
+
+    return df_final
+
+
+# Run the model
+projection_df = run_forecast(current_inputs, df_initial)
+
+# --- 4. Visualization and Output (NEW ALTAIR CHARTS WITH HOVER) ---
+
+def create_interactive_line_chart(df, teams_to_plot, title):
+    # Prepare data for Altair (long format)
+    df_long = df[teams_to_plot].reset_index().rename(columns={'index': 'Month'})
+    df_long = pd.melt(df_long, id_vars='Month', var_name='Team', value_name='Headcount')
+
+    # 1. Selection for highlighting (clickable legend)
+    selection_highlight = alt.selection_point(
+        fields=['Team'],
+        bind='legend',
+        name='SelectionHighlight'
+    )
+    
+    # 2. Selection for hover/tooltip
+    hover = alt.selection_point(
+        fields=['Month'],
+        nearest=True,
+        on='mouseover',
+        empty='none',
+        name='HoverSelection'
+    )
+    
+    base = alt.Chart(df_long, title=title).encode(
+        x=alt.X('Month:T', axis=alt.Axis(title='Month', format="%Y-%m")),
+        y=alt.Y('Headcount:Q', title='Headcount'),
+        color='Team:N',
+        tooltip=['Month:T', 'Team:N', alt.Tooltip('Headcount:Q', format=',')]
+    )
+
+    # Layer 1: Lines (opacity controlled by clickable legend)
+    lines = base.mark_line().encode(
+        opacity=alt.condition(selection_highlight, alt.value(1), alt.value(0.2))
+    )
+
+    # Layer 2: Points (shown on hover, used for tooltips)
+    points = lines.mark_point().encode(
+        opacity=alt.condition(hover, alt.value(1), alt.value(0))
+    ).add_params(hover)
+
+    # Layer 3: Rules (vertical line shown on hover)
+    rules = base.mark_rule().encode(
+        x='Month:T',
+        opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+        tooltip=['Month:T'] # Tooltip on the rule itself
+    ).add_params(hover)
+
+    # Combine all layers and add the clickable highlight selection
+    chart = (lines + rules + points).add_params(
+        selection_highlight
+    ).interactive()
+
+    return chart
+
+st.header("Total Headcount Projection")
+total_teams = ['Total Headcount', 'SMB Total', 'CMRL Total', 'MM Total']
+total_chart = create_interactive_line_chart(projection_df, total_teams, "Aggregate and Total Headcount Forecast")
+st.altair_chart(total_chart, use_container_width=True)
+
+
+st.header("Individual Team Headcount Projections")
+individual_chart = create_interactive_line_chart(projection_df, df_initial.index.tolist(), "Individual Team Forecast")
+st.altair_chart(individual_chart, use_container_width=True)
+
+
+st.markdown(f"**Total Projected Headcount by End of 2026:** **{projection_df['Total Headcount'].iloc[-1]:,}**")
+
+st.subheader("Detailed Monthly Projection Table")
+st.dataframe(projection_df)
