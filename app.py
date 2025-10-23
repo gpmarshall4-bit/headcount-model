@@ -7,7 +7,7 @@ from datetime import date
 # Set the end date for the forecast
 END_DATE = date(2026, 12, 31)
 
-# --- 1. Initial Data Setup (Team Names Updated) ---
+# --- 1. Initial Data Setup ---
 initial_data = {
     'Team': [
         'SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM', 
@@ -145,9 +145,12 @@ def run_forecast(inputs, initial_data):
 # Run the model
 projection_df = run_forecast(current_inputs, df_initial)
 
-# --- 4. Visualization and Output (Altair Charts with Robust Date Parsing) ---
+# --- 4. Visualization and Output (Altair Charts with Robust Data Format) ---
 
-def create_interactive_line_chart(df, teams_to_plot, title):
+def create_interactive_line_chart(df_dict, teams_to_plot, title):
+    # FIX: Convert the dictionary back to a DataFrame immediately
+    df = pd.DataFrame(df_dict)
+    
     # Prepare data for Altair (long format)
     df_long = df[teams_to_plot].reset_index().rename(columns={'index': 'Month'})
     
@@ -175,15 +178,12 @@ def create_interactive_line_chart(df, teams_to_plot, title):
     
     # Base chart definition
     base = alt.Chart(df_long, title=title).encode(
-        # FIX: Explicitly set the time unit (T) and the parsing format ('%Y-%m')
-        x=alt.X('Month:T', axis=alt.Axis(title='Month', format="%Y-%m"), timeUnit='yearmonth', 
-                # This helps Altair parse the string month correctly
-                # We use the 'timeUnit' and 'format' to make parsing reliable
-                ), 
+        # Explicitly set the time unit (T) and the parsing format ('%Y-%m')
+        x=alt.X('Month:T', axis=alt.Axis(title='Month', format="%Y-%m"), timeUnit='yearmonth'), 
         y=alt.Y('Headcount:Q', title='Headcount', axis=alt.Axis(format=',f')),
         color='Team:N',
         tooltip=[
-            alt.Tooltip('Month:T', title='Month', format="%Y-%m"), # Fix tooltip format
+            alt.Tooltip('Month:T', title='Month', format="%Y-%m"), 
             'Team:N', 
             alt.Tooltip('Headcount:Q', format=',f', title='Headcount')
         ]
@@ -217,12 +217,14 @@ def create_interactive_line_chart(df, teams_to_plot, title):
 
 st.header("Total Headcount Projection")
 total_teams = ['Total Headcount', 'SMB Total', 'CMRL Total', 'MM Total']
-total_chart = create_interactive_line_chart(projection_df, total_teams, "Aggregate and Total Headcount Forecast")
+# FIX: Convert DataFrame to a serializable dictionary when calling
+total_chart = create_interactive_line_chart(projection_df.to_dict(), total_teams, "Aggregate and Total Headcount Forecast")
 st.altair_chart(total_chart, use_container_width=True)
 
 
 st.header("Individual Team Headcount Projections")
-individual_chart = create_interactive_line_chart(projection_df, df_initial.index.tolist(), "Individual Team Forecast")
+# FIX: Convert DataFrame to a serializable dictionary when calling
+individual_chart = create_interactive_line_chart(projection_df.to_dict(), df_initial.index.tolist(), "Individual Team Forecast")
 st.altair_chart(individual_chart, use_container_width=True)
 
 
