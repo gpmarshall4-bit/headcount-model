@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import altair as alt 
 from datetime import date
 
 # Set the end date for the forecast
 END_DATE = date(2026, 12, 31)
 
-# --- 1. Initial Data Setup ---
+# --- 1. Initial Data Setup (RENAMED TEAMS HERE) ---
+# Base data structure reflecting the initial table
 initial_data = {
     'Team': [
         'SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM', 
@@ -27,7 +27,7 @@ initial_data = {
 df_initial = pd.DataFrame(initial_data).set_index('Team')
 
 # --- 2. Streamlit UI and Interactive Controls ---
-st.set_page_config(layout="wide", page_title="Interactive Headcount Growth Model")
+st.set_page_config(layout="wide", page_title="Headcount Growth Model")
 
 st.title("Interactive Headcount Growth Model 🚀")
 st.caption("Adjust the sliders in the sidebar to dynamically forecast team and total headcount through the end of 2026.")
@@ -40,14 +40,17 @@ st.sidebar.header("Team Specific Controls")
 for team in teams:
     st.sidebar.subheader(f"📊 {team}")
     
+    # Starting HC (Input)
     current_inputs[f'{team}_start_hc'] = st.sidebar.number_input(
         f"Starting HC ({team})", min_value=0, value=df_initial.loc[team, 'Starting_HC'], key=f'shc_{team}'
     )
-    
+
+    # Monthly Hires (Input)
     current_inputs[f'{team}_hires'] = st.sidebar.number_input(
         f"Monthly New Hires ({team})", min_value=0, value=df_initial.loc[team, 'Monthly_Hires'], key=f'mhi_{team}'
     )
     
+    # Monthly Attrition Rate (%) (Slider)
     current_inputs[f'{team}_attrition'] = st.sidebar.slider(
         f"Monthly Attrition Rate (%) ({team})", 
         min_value=0.0, max_value=10.0, step=0.1, 
@@ -55,6 +58,7 @@ for team in teams:
         format="%.1f %%", key=f'mar_{team}'
     ) / 100.0
 
+    # Quarterly Promotion Rate (%) (Slider)
     current_inputs[f'{team}_promotion'] = st.sidebar.slider(
         f"Quarterly Promotion Rate (%) ({team})", 
         min_value=0.0, max_value=40.0, step=0.5, 
@@ -82,6 +86,7 @@ def run_forecast(inputs, initial_data):
         
     results_df = results_df.astype(float) 
     
+    
     # Simulation loop
     for m in range(1, num_months + 1):
         prev_month_label = results_df.index[m-1]
@@ -94,16 +99,17 @@ def run_forecast(inputs, initial_data):
 
         for team in initial_data.index:
             
+            # --- Get Inputs for Current Team ---
             current_hc = results_df.loc[prev_month_label, team]
             monthly_hires = inputs[f'{team}_hires']
             monthly_attrition = inputs[f'{team}_attrition']
             quarterly_promotion_rate = inputs[f'{team}_promotion']
             
-            # Attrition & New Hires
+            # --- 1. Attrition & 2. New Hires ---
             attrition_count = current_hc * monthly_attrition
             current_hc = current_hc - attrition_count + monthly_hires
             
-            # Promotions
+            # --- 3. Promotions (Calculated Monthly, Applied Quarterly) ---
             promotion_destination = initial_data.loc[team, 'Promotion_Destination']
             
             if m % 3 == 0: 
@@ -120,7 +126,7 @@ def run_forecast(inputs, initial_data):
                 
             results_df.loc[current_month_label, team] = current_hc
         
-        # Promotions In
+        # --- 4. Promotions In (Applied only at month m % 3 == 0) ---
         if m % 3 == 0:
             for team, promo_in_count in promotions_in.items():
                 results_df.loc[current_month_label, team] += promo_in_count
@@ -132,7 +138,7 @@ def run_forecast(inputs, initial_data):
     # Final cleanup: fill NaNs with 0, round to nearest integer, and drop the 'Start' row
     results_df = results_df.fillna(0).round(0).astype(int)
     
-    # Create aggregated rows for SMB, CMRL, MM
+    # Create aggregated rows for SMB, CMRL, MM (UPDATED TEAM NAMES HERE)
     df_final = results_df.drop('Start').copy()
     
     df_final['SMB Total'] = df_final[['SMB 1-2 AM', 'SMB 3-4 AM', 'SMB 5-9 AM']].sum(axis=1)
@@ -145,88 +151,13 @@ def run_forecast(inputs, initial_data):
 # Run the model
 projection_df = run_forecast(current_inputs, df_initial)
 
-# --- 4. Visualization and Output (Altair Charts with Robust Data Format) ---
-
-def create_interactive_line_chart(df_dict, teams_to_plot, title):
-    # FIX: Convert the dictionary back to a DataFrame immediately
-    df = pd.DataFrame(df_dict)
-    
-    # Prepare data for Altair (long format)
-    df_long = df[teams_to_plot].reset_index().rename(columns={'index': 'Month'})
-    
-    # Ensure 'Month' is explicitly a string for Altair to parse
-    df_long['Month'] = df_long['Month'].astype(str)
-    
-    # Melt the data into long format for Altair
-    df_long = pd.melt(df_long, id_vars='Month', var_name='Team', value_name='Headcount')
-
-    # 1. Selection for highlighting (clickable legend)
-    selection_highlight = alt.selection_point(
-        fields=['Team'],
-        bind='legend',
-        name='SelectionHighlight'
-    )
-    
-    # 2. Selection for hover/tooltip (for nearest point)
-    hover = alt.selection_point(
-        fields=['Month'],
-        nearest=True,
-        on='mouseover',
-        empty='none',
-        name='HoverSelection'
-    )
-    
-    # Base chart definition
-    base = alt.Chart(df_long, title=title).encode(
-        # Explicitly set the time unit (T) and the parsing format ('%Y-%m')
-        x=alt.X('Month:T', axis=alt.Axis(title='Month', format="%Y-%m"), timeUnit='yearmonth'), 
-        y=alt.Y('Headcount:Q', title='Headcount', axis=alt.Axis(format=',f')),
-        color='Team:N',
-        tooltip=[
-            alt.Tooltip('Month:T', title='Month', format="%Y-%m"), 
-            'Team:N', 
-            alt.Tooltip('Headcount:Q', format=',f', title='Headcount')
-        ]
-    )
-
-    # Layer 1: Lines (opacity controlled by clickable legend)
-    lines = base.mark_line().encode(
-        opacity=alt.condition(selection_highlight, alt.value(1), alt.value(0.2))
-    )
-
-    # Layer 2: Points (shown on hover, used for tooltips)
-    points = lines.mark_point().encode(
-        opacity=alt.condition(hover, alt.value(1), alt.value(0))
-    ).add_params(hover)
-
-    # Layer 3: Rules (vertical line shown on hover)
-    rules = base.mark_rule().encode(
-        x='Month:T',
-        opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
-        tooltip=[alt.Tooltip('Month:T', title='Month', format="%Y-%m"), 'Team:N', alt.Tooltip('Headcount:Q', format=',f', title='Headcount')]
-    ).add_params(hover)
-
-    # Combine all layers and add the clickable highlight selection
-    chart = (lines + rules + points).add_params(
-        selection_highlight
-    ).properties(
-        height=400 
-    ).interactive()
-
-    return chart
+# --- 4. Visualization and Output ---
 
 st.header("Total Headcount Projection")
-total_teams = ['Total Headcount', 'SMB Total', 'CMRL Total', 'MM Total']
-# FIX: Convert DataFrame to a serializable dictionary when calling
-total_chart = create_interactive_line_chart(projection_df.to_dict(), total_teams, "Aggregate and Total Headcount Forecast")
-st.altair_chart(total_chart, use_container_width=True)
-
+st.line_chart(projection_df[['Total Headcount', 'SMB Total', 'CMRL Total', 'MM Total']])
 
 st.header("Individual Team Headcount Projections")
-# FIX: Convert DataFrame to a serializable dictionary when calling
-individual_chart = create_interactive_line_chart(projection_df.to_dict(), df_initial.index.tolist(), "Individual Team Forecast")
-st.altair_chart(individual_chart, use_container_width=True)
-
+st.line_chart(projection_df[df_initial.index.tolist()])
 
 st.markdown(f"**Total Projected Headcount by End of 2026:** **{projection_df['Total Headcount'].iloc[-1]:,}**")
 
